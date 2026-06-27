@@ -10,14 +10,16 @@ Plugin para [Obsidian](https://obsidian.md) que sincroniza seu vault via S3/MinI
 
 ## Instalação rápida
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/Kruceo/obsidian-s3-sync/master/install.sh | bash -s -- /caminho/do/vault
-```
-
-Exemplo:
+**macOS / Linux**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Kruceo/obsidian-s3-sync/master/install.sh | bash -s -- ~/Documents/MeuVault
+```
+
+**Windows (PowerShell)**
+
+```powershell
+irm https://raw.githubusercontent.com/Kruceo/obsidian-s3-sync/master/install.ps1 | iex -Args "C:\Users\Você\Documents\MeuVault"
 ```
 
 O script:
