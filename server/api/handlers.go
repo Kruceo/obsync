@@ -93,11 +93,20 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Files syncdiff.ClientManifest `json:"files"`
+		Files   syncdiff.ClientManifest `json:"files"`
+		Deleted []string                `json:"deleted"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
+	}
+
+	// processa deletes explícitos antes do diff
+	for _, path := range body.Deleted {
+		if err := s.store.Delete(path); err != nil {
+			http.Error(w, "storage error", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	diff := syncdiff.Diff(body.Files, s.store.Snapshot())

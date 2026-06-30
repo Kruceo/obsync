@@ -1,6 +1,6 @@
 import { Plugin, Notice, TAbstractFile, TFile } from 'obsidian';
 import { SyncSettings, DEFAULT_SETTINGS, SyncSettingTab } from './settings';
-import { HttpContext, testConnection, deleteFile } from './http/client';
+import { HttpContext, testConnection } from './http/client';
 import { runSync, SyncResult } from './sync/engine';
 import { detectLocalPlugins } from './plugins/detector';
 import { fetchRegistry, RegistryEntry } from './plugins/registry';
@@ -18,6 +18,7 @@ export default class SyncPlugin extends Plugin {
   private httpCtx: HttpContext | null = null;
   private dataWriteLock: Promise<void> = Promise.resolve();
   private debounceTimer: number | null = null;
+  private pendingDeletes: Set<string> = new Set();
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -63,10 +64,8 @@ export default class SyncPlugin extends Plugin {
       this.app.vault.on('delete', (file: TAbstractFile) => {
         if (!(file instanceof TFile)) return;
         if (file.path.startsWith('.obsidian/')) return;
-        if (!this.settings.serverUrl || !this.settings.password) return;
-        deleteFile(this.getHttpCtx(), file.path).catch((err) => {
-          console.warn(`Sync: failed to delete ${file.path} on server`, err);
-        });
+        this.pendingDeletes.add(file.path);
+        scheduleSync();
       }),
     );
 
@@ -141,7 +140,10 @@ export default class SyncPlugin extends Plugin {
       new Notice('Sync: iniciando...');
       const ctx = this.getHttpCtx();
 
-      const result = await runSync(ctx, this.app.vault);
+      const deleted = [...this.pendingDeletes];
+      const result = await runSync(ctx, this.app.vault, deleted);
+      // limpa só após sync bem-sucedido
+      deleted.forEach((p) => this.pendingDeletes.delete(p));
 
       if (this.settings.syncPluginList) {
         try {
