@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   plugin:
-    name: Release plugin
+    name: Build plugin
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -24,13 +24,17 @@ jobs:
           cache-dependency-path: plugin/package-lock.json
       - run: npm ci
       - run: npm run build
-      - name: Collect release files
-        run: |
-          mkdir -p ../release
-          cp main.js manifest.json styles.css ../release/
+      - name: Upload plugin artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin
+          path: |
+            plugin/main.js
+            plugin/manifest.json
+            plugin/styles.css
 
   server:
-    name: Release server
+    name: Build server (${{ matrix.os }}-${{ matrix.arch }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -61,14 +65,25 @@ jobs:
         run: |
           EXT=""
           [ "${{ matrix.os }}" = "windows" ] && EXT=".exe"
-          go build -o ../release/obsidian-sync-server-${{ matrix.os }}-${{ matrix.arch }}${EXT} .
+          go build -o obsidian-sync-server-${{ matrix.os }}-${{ matrix.arch }}${EXT} .
+      - name: Upload server artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-${{ matrix.os }}-${{ matrix.arch }}
+          path: server/obsidian-sync-server-*
 
   release:
     name: Create release
     needs: [plugin, server]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+      - name: List release files
+        run: ls -la release/
       - uses: softprops/action-gh-release@v2
         with:
           files: release/*
