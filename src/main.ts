@@ -1,7 +1,7 @@
 import { Plugin, Notice, TFile, normalizePath } from 'obsidian';
 import { S3SyncSettings, DEFAULT_SETTINGS, S3SyncSettingTab } from './settings';
 import { S3Context, testConnection as testS3Connection } from './s3/client';
-import { SyncState, loadState } from './sync/state';
+import { SyncState, loadState, buildS3Key, clearStateIfS3Changed } from './sync/state';
 import { runSync, SyncResult } from './sync/engine';
 import { detectLocalPlugins, LocalPluginInfo } from './plugins/detector';
 import { fetchRegistry, RegistryEntry } from './plugins/registry';
@@ -115,6 +115,8 @@ export default class S3SyncPlugin extends Plugin {
       };
 
       try {
+        const s3Key = buildS3Key(this.settings.endpoint, this.settings.bucket, this.settings.prefix ?? '');
+        await clearStateIfS3Changed(this, s3Key);
         const state: SyncState = await loadState(this);
         result = await runSync({
           s3Ctx,
