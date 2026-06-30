@@ -18,25 +18,26 @@ func Diff(client ClientManifest, server storage.Manifest) DiffResult {
 		Delete: []string{},
 	}
 
-	// Arquivos que o servidor tem mas o cliente não enviou → cliente deve baixar ou deletar
-	for path, serverHash := range server {
+	for path, entry := range server {
+		if entry.Deleted {
+			// servidor deletou → se cliente ainda tem, manda deletar
+			if _, exists := client[path]; exists {
+				result.Delete = append(result.Delete, path)
+			}
+			continue
+		}
+
 		clientHash, exists := client[path]
-		if !exists {
-			// Servidor tem, cliente não tem → pull
-			result.Pull = append(result.Pull, path)
-		} else if clientHash != serverHash {
-			// Hashes divergem → servidor é fonte da verdade, cliente baixa
+		if !exists || clientHash != entry.Hash {
 			result.Pull = append(result.Pull, path)
 		}
-		_ = serverHash
 	}
 
-	// Arquivos que o cliente tem mas o servidor não → push
-	for path, clientHash := range client {
+	// arquivos que o cliente tem mas o servidor não conhece → push
+	for path := range client {
 		if _, exists := server[path]; !exists {
 			result.Push = append(result.Push, path)
 		}
-		_ = clientHash
 	}
 
 	return result
