@@ -2,12 +2,32 @@ import { HttpContext, putFile, getFile } from '../http/client';
 import { SyncSettings } from '../settings';
 import { LocalPluginInfo } from './detector';
 import { Vault, normalizePath } from 'obsidian';
+import { hashContent } from '../sync/hash';
 
 const PLUGINS_LIST_PATH = '_obsync/plugins.json';
 const CONFIG_PREFIX = '_obsync/configs/';
-const DUMMY_HASH = 'dynamic';
+const SAFE_ID = /^[a-zA-Z0-9_-]+$/;
 
-/** Sobe plugins.json + configs para o servidor. */
+// cache em memória: evita re-upload quando o conteúdo não mudou
+const lastUploadedHash = new Map<string, string>();
+
+function assertSafePluginId(id: string): void {
+  if (!SAFE_ID.test(id)) throw new Error(`Unsafe plugin id rejected: "${id}"`);
+}
+
+async function hashJson(obj: unknown): Promise<string> {
+  const bytes = new TextEncoder().encode(JSON.stringify(obj));
+  return hashContent(bytes.buffer as ArrayBuffer);
+}
+
+async function putIfChanged(ctx: HttpContext, path: string, data: Uint8Array): Promise<boolean> {
+  const hash = await hashContent(data.buffer as ArrayBuffer);
+  if (lastUploadedHash.get(path) === hash) return false;
+  await putFile(ctx, path, hash, data.buffer as ArrayBuffer);
+  lastUploadedHash.set(path, hash);
+  return true;
+}
+
 export async function pushPluginData(
   ctx: HttpContext,
   plugins: LocalPluginInfo[],
@@ -15,16 +35,17 @@ export async function pushPluginData(
   settings: SyncSettings,
 ): Promise<void> {
   const payload = new TextEncoder().encode(JSON.stringify(plugins));
-  await putFile(ctx, PLUGINS_LIST_PATH, DUMMY_HASH, payload.buffer as ArrayBuffer);
+  await putIfChanged(ctx, PLUGINS_LIST_PATH, payload);
 
   if (settings.syncPluginConfigs) {
     for (const plugin of plugins) {
       try {
+        assertSafePluginId(plugin.id);
         const configPath = normalizePath(`.obsidian/plugins/${plugin.id}/data.json`);
         if (!(await vault.adapter.exists(configPath))) continue;
         const raw = await vault.adapter.read(configPath);
         const data = new TextEncoder().encode(raw);
-        await putFile(ctx, `${CONFIG_PREFIX}${plugin.id}.json`, DUMMY_HASH, data.buffer as ArrayBuffer);
+        await putIfChanged(ctx, `${CONFIG_PREFIX}${plugin.id}.json`, data);
       } catch (err) {
         console.warn(`Sync: failed to push config for ${plugin.id}`, err);
       }
@@ -32,7 +53,6 @@ export async function pushPluginData(
   }
 }
 
-/** Baixa plugins.json do servidor. Retorna null se não existir. */
 export async function pullPluginList(ctx: HttpContext): Promise<LocalPluginInfo[] | null> {
   try {
     const data = await getFile(ctx, PLUGINS_LIST_PATH);
@@ -43,9 +63,9 @@ export async function pullPluginList(ctx: HttpContext): Promise<LocalPluginInfo[
   }
 }
 
-/** Baixa config de um plugin. Retorna null se não existir. */
 export async function pullPluginConfig(ctx: HttpContext, pluginId: string): Promise<ArrayBuffer | null> {
   try {
+    assertSafePluginId(pluginId);
     return await getFile(ctx, `${CONFIG_PREFIX}${pluginId}.json`);
   } catch {
     return null;

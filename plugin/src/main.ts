@@ -165,9 +165,11 @@ export default class SyncPlugin extends Plugin {
           await pushPluginData(ctx, localPlugins, this.app.vault, this.settings);
 
           const remotePlugins = await pullPluginList(ctx);
-          if (remotePlugins) {
+          if (remotePlugins && remotePlugins.length > 0) {
             const localIds = new Set(localPlugins.map((p) => p.id));
-            const missing = remotePlugins.filter((p) => !localIds.has(p.id));
+            const missing = remotePlugins.filter(
+              (p) => p.id && /^[a-zA-Z0-9_-]+$/.test(p.id) && !localIds.has(p.id),
+            );
 
             if (missing.length > 0) {
               const registry = await this.getRegistry();
