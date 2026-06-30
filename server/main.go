@@ -44,7 +44,14 @@ func main() {
 		port = "8080"
 	}
 
-	store, err := storage.New(dataDir)
+	trashTTLDays := 30
+	if v := os.Getenv("TRASH_TTL_DAYS"); v != "" {
+		if _, err := fmt.Sscanf(v, "%d", &trashTTLDays); err != nil {
+			log.Printf("invalid TRASH_TTL_DAYS %q, using default 30", v)
+		}
+	}
+
+	store, err := storage.New(dataDir, time.Duration(trashTTLDays)*24*time.Hour)
 	if err != nil {
 		log.Fatalf("storage init: %v", err)
 	}
