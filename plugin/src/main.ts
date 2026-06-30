@@ -26,6 +26,8 @@ export default class SyncPlugin extends Plugin {
 
     this.addRibbonIcon('refresh-cw', 'Obsidian Sync', () => this.performSync());
 
+    this.app.workspace.onLayoutReady(() => this.performSync(true));
+
     this.addCommand({
       id: 'sync-now',
       name: 'Sync now',
