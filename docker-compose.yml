@@ -1,43 +1,14 @@
 services:
-  minio:
-    image: minio/minio:latest
-    container_name: obsidian-minio
+  obsync:
+    image: ghcr.io/kruceo/obsync:latest
     restart: unless-stopped
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "4377:4377"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      SYNC_PASSWORD: yourpassword
+      JWT_SECRET: yoursecret
     volumes:
-      - minio_data:/data
-    command: server /data --console-address ":9001"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-      start_period: 5s
-
-  minio-setup:
-    image: minio/mc:latest
-    container_name: obsidian-minio-setup
-    depends_on:
-      minio:
-        condition: service_healthy
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    entrypoint: >
-      /bin/sh -c "
-      echo 'Aguardando MinIO...';
-      /usr/bin/mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} --api S3v4;
-      /usr/bin/mc mb local/obsidian-vault --ignore-existing;
-      /usr/bin/mc anonymous set download local/obsidian-vault;
-      echo 'Bucket obsidian-vault pronto.';
-      exit 0;
-      "
+      - obsync_data:/data
 
 volumes:
-  minio_data:
-    driver: local
+  obsync_data:
