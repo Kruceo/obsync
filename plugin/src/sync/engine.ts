@@ -3,14 +3,14 @@ import { HttpContext, syncManifest, putFile, getFile, deleteFile } from '../http
 import { hashContent } from './hash';
 
 export interface SyncResult {
-  pushed: number;
-  pulled: number;
-  deleted: number;
+  pushed: string[];
+  pulled: string[];
+  deleted: string[];
   errors: string[];
 }
 
 export async function runSync(ctx: HttpContext, vault: Vault, pendingDeletes: string[] = []): Promise<SyncResult> {
-  const result: SyncResult = { pushed: 0, pulled: 0, deleted: 0, errors: [] };
+  const result: SyncResult = { pushed: [], pulled: [], deleted: [], errors: [] };
 
   // 1. Monta manifesto local: path → hash
   const localFiles = vault.getFiles().filter((f) => !f.path.startsWith('.obsidian/'));
@@ -49,7 +49,7 @@ export async function runSync(ctx: HttpContext, vault: Vault, pendingDeletes: st
               ? await vault.readBinary(file)
               : await vault.adapter.readBinary(normalizePath(path));
           await putFile(ctx, path, manifest[path], content);
-          result.pushed++;
+          result.pushed.push(path);
         } catch (err) {
           result.errors.push(`push ${path}: ${err instanceof Error ? err.message : String(err)}`);
         }
@@ -74,7 +74,7 @@ export async function runSync(ctx: HttpContext, vault: Vault, pendingDeletes: st
             if (dir) await vault.adapter.mkdir(dir);
             await vault.adapter.writeBinary(normalized, content);
           }
-          result.pulled++;
+          result.pulled.push(path);
         } catch (err) {
           result.errors.push(`pull ${path}: ${err instanceof Error ? err.message : String(err)}`);
         }
@@ -88,7 +88,7 @@ export async function runSync(ctx: HttpContext, vault: Vault, pendingDeletes: st
       sem.run(async () => {
         try {
           await vault.adapter.remove(normalizePath(path));
-          result.deleted++;
+          result.deleted.push(path);
         } catch (err) {
           result.errors.push(`delete ${path}: ${err instanceof Error ? err.message : String(err)}`);
         }
