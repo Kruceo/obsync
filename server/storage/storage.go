@@ -14,6 +14,7 @@ import (
 
 type Entry struct {
 	Hash      string `json:"hash,omitempty"`
+	UpdatedAt int64  `json:"updatedAt,omitempty"` // unix ms — when last uploaded
 	Deleted   bool   `json:"deleted,omitempty"`
 	DeletedAt int64  `json:"deletedAt,omitempty"` // unix ms
 }
@@ -125,7 +126,7 @@ func (s *Store) Put(path, hash string, r io.Reader) error {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.manifest[path] = Entry{Hash: hash}
+	s.manifest[path] = Entry{Hash: hash, UpdatedAt: time.Now().UnixMilli()}
 	return s.saveManifest()
 }
 

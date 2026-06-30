@@ -40,9 +40,14 @@ function authHeader(token: string) {
   return { Authorization: `Bearer ${token}` };
 }
 
+export interface ClientFile {
+  hash: string;
+  modifiedAt: number; // unix ms
+}
+
 export async function syncManifest(
   ctx: HttpContext,
-  files: Record<string, string>,
+  files: Record<string, ClientFile>,
   deleted: string[] = [],
 ): Promise<DiffResult> {
   const token = await ensureToken(ctx);

@@ -93,7 +93,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Files   syncdiff.ClientManifest `json:"files"`
+		Files   syncdiff.ClientManifest `json:"files"`   // path → {hash, modifiedAt}
 		Deleted []string                `json:"deleted"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {

@@ -2,15 +2,22 @@ package sync
 
 import "github.com/Kruceo/obsidian-s3-sync/server/storage"
 
-type ClientManifest map[string]string // path → sha256
-
-type DiffResult struct {
-	Push   []string `json:"push"`   // cliente deve enviar esses arquivos
-	Pull   []string `json:"pull"`   // cliente deve baixar esses arquivos
-	Delete []string `json:"delete"` // cliente deve deletar localmente
+// ClientFile represents a local file as reported by the client.
+type ClientFile struct {
+	Hash       string `json:"hash"`
+	ModifiedAt int64  `json:"modifiedAt"` // unix ms — local mtime
 }
 
-// Diff compara o manifesto do cliente com o estado atual do servidor.
+type ClientManifest map[string]ClientFile
+
+type DiffResult struct {
+	Push   []string `json:"push"`   // client should upload these
+	Pull   []string `json:"pull"`   // client should download these
+	Delete []string `json:"delete"` // client should delete these locally
+}
+
+// Diff compares the client manifest against the server state and returns
+// what each side needs to do to converge. Conflict resolution: newest wins.
 func Diff(client ClientManifest, server storage.Manifest) DiffResult {
 	result := DiffResult{
 		Push:   []string{},
@@ -20,22 +27,28 @@ func Diff(client ClientManifest, server storage.Manifest) DiffResult {
 
 	for path, entry := range server {
 		if entry.Deleted {
-			// servidor deletou → se cliente ainda tem, manda deletar
 			if _, exists := client[path]; exists {
 				result.Delete = append(result.Delete, path)
 			}
 			continue
 		}
 
-		clientHash, exists := client[path]
+		clientFile, exists := client[path]
 		if !exists {
 			result.Pull = append(result.Pull, path)
-		} else if clientHash != entry.Hash {
-			result.Push = append(result.Push, path)
+			continue
+		}
+		if clientFile.Hash != entry.Hash {
+			// Both sides have the file but differ — newest wins.
+			if clientFile.ModifiedAt > entry.UpdatedAt {
+				result.Push = append(result.Push, path)
+			} else {
+				result.Pull = append(result.Pull, path)
+			}
 		}
 	}
 
-	// arquivos que o cliente tem mas o servidor não conhece → push
+	// Files the client has that the server doesn't know about → push.
 	for path := range client {
 		if _, exists := server[path]; !exists {
 			result.Push = append(result.Push, path)

@@ -1,5 +1,5 @@
 import { Vault, TFile, normalizePath } from 'obsidian';
-import { HttpContext, syncManifest, putFile, getFile, deleteFile } from '../http/client';
+import { HttpContext, ClientFile, syncManifest, putFile, getFile, deleteFile } from '../http/client';
 import { hashContent } from './hash';
 import { log, warn } from '../log';
 
@@ -17,13 +17,16 @@ export async function runSync(ctx: HttpContext, vault: Vault, pendingDeletes: st
   const localFiles = vault.getFiles().filter(
     (f) => !f.path.startsWith('.obsidian/') && !f.path.startsWith('_obsync/'),
   );
-  const manifest: Record<string, string> = {};
+  const manifest: Record<string, ClientFile> = {};
 
   await Promise.all(
     localFiles.map(async (file) => {
       try {
         const content = await vault.readBinary(file);
-        manifest[file.path] = await hashContent(content);
+        manifest[file.path] = {
+          hash: await hashContent(content),
+          modifiedAt: file.stat.mtime,
+        };
       } catch (err) {
         result.errors.push(`hash ${file.path}: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -56,7 +59,7 @@ export async function runSync(ctx: HttpContext, vault: Vault, pendingDeletes: st
             file instanceof TFile
               ? await vault.readBinary(file)
               : await vault.adapter.readBinary(normalizePath(path));
-          await putFile(ctx, path, manifest[path], content);
+          await putFile(ctx, path, manifest[path].hash, content);
           result.pushed.push(path);
         } catch (err) {
           result.errors.push(`push ${path}: ${err instanceof Error ? err.message : String(err)}`);
