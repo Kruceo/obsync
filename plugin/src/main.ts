@@ -8,6 +8,8 @@ import { pushPluginData, pullPluginList, pullPluginConfig } from './plugins/sync
 import { installPluginFromGitHub, installPluginConfig, enablePlugin } from './plugins/installer';
 import { MissingPluginsModal } from './plugins/modal';
 
+const DEBOUNCE_MS = 60_000; // 1 minuto
+
 export default class SyncPlugin extends Plugin {
   settings: SyncSettings;
   autoSyncIntervalId: number | null = null;
@@ -15,6 +17,7 @@ export default class SyncPlugin extends Plugin {
   private syncing = false;
   private httpCtx: HttpContext | null = null;
   private dataWriteLock: Promise<void> = Promise.resolve();
+  private debounceTimer: number | null = null;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -28,6 +31,33 @@ export default class SyncPlugin extends Plugin {
     });
 
     this.addSettingTab(new SyncSettingTab(this.app, this));
+
+    const scheduleSync = () => {
+      if (!this.settings.serverUrl || !this.settings.password) return;
+      if (this.debounceTimer !== null) window.clearTimeout(this.debounceTimer);
+      this.debounceTimer = window.setTimeout(() => {
+        this.debounceTimer = null;
+        this.performSync();
+      }, DEBOUNCE_MS);
+    };
+
+    this.registerEvent(
+      this.app.vault.on('create', (file: TAbstractFile) => {
+        if (file instanceof TFile && !file.path.startsWith('.obsidian/')) scheduleSync();
+      }),
+    );
+
+    this.registerEvent(
+      this.app.vault.on('modify', (file: TAbstractFile) => {
+        if (file instanceof TFile && !file.path.startsWith('.obsidian/')) scheduleSync();
+      }),
+    );
+
+    this.registerEvent(
+      this.app.vault.on('rename', (file: TAbstractFile) => {
+        if (file instanceof TFile && !file.path.startsWith('.obsidian/')) scheduleSync();
+      }),
+    );
 
     this.registerEvent(
       this.app.vault.on('delete', (file: TAbstractFile) => {
@@ -51,6 +81,10 @@ export default class SyncPlugin extends Plugin {
     if (this.autoSyncIntervalId !== null) {
       window.clearInterval(this.autoSyncIntervalId);
       this.autoSyncIntervalId = null;
+    }
+    if (this.debounceTimer !== null) {
+      window.clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
     }
   }
 
