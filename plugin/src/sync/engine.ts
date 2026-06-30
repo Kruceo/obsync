@@ -9,7 +9,7 @@ export interface SyncResult {
   errors: string[];
 }
 
-export async function runSync(ctx: HttpContext, vault: Vault): Promise<SyncResult> {
+export async function runSync(ctx: HttpContext, vault: Vault, pendingDeletes: string[] = []): Promise<SyncResult> {
   const result: SyncResult = { pushed: 0, pulled: 0, deleted: 0, errors: [] };
 
   // 1. Monta manifesto local: path → hash
@@ -27,10 +27,10 @@ export async function runSync(ctx: HttpContext, vault: Vault): Promise<SyncResul
     }),
   );
 
-  // 2. Envia manifesto, recebe diff
+  // 2. Envia manifesto + deletes pendentes, recebe diff
   let diff: { push: string[]; pull: string[]; delete: string[] };
   try {
-    diff = await syncManifest(ctx, manifest);
+    diff = await syncManifest(ctx, manifest, pendingDeletes);
   } catch (err) {
     result.errors.push(`manifest: ${err instanceof Error ? err.message : String(err)}`);
     return result;

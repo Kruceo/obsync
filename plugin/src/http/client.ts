@@ -43,13 +43,14 @@ function authHeader(token: string) {
 export async function syncManifest(
   ctx: HttpContext,
   files: Record<string, string>,
+  deleted: string[] = [],
 ): Promise<DiffResult> {
   const token = await ensureToken(ctx);
   const res = await requestUrl({
     url: `${ctx.serverUrl}/sync/manifest`,
     method: 'POST',
     headers: { ...authHeader(token), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ files }),
+    body: JSON.stringify({ files, deleted }),
     throw: false,
   });
 
