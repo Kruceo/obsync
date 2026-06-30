@@ -128,11 +128,11 @@ export default class SyncPlugin extends Plugin {
   async performSync(): Promise<SyncResult> {
     if (this.syncing) {
       new Notice('Sync: já em andamento');
-      return { pushed: 0, pulled: 0, deleted: 0, errors: ['already in progress'] };
+      return { pushed: [], pulled: [], deleted: [], errors: ['already in progress'] };
     }
     if (!this.settings.serverUrl || !this.settings.password) {
       new Notice('Sync: configure a URL do servidor e a senha primeiro.');
-      return { pushed: 0, pulled: 0, deleted: 0, errors: ['not configured'] };
+      return { pushed: [], pulled: [], deleted: [], errors: ['not configured'] };
     }
 
     this.syncing = true;
@@ -187,7 +187,11 @@ export default class SyncPlugin extends Plugin {
         }
       }
 
-      new Notice(`Sync completo: ${result.pushed}↑ ${result.pulled}↓ ${result.deleted}🗑`);
+      const lines: string[] = [];
+      if (result.pushed.length) lines.push(`↑ ${result.pushed.map(basename).join(', ')}`);
+      if (result.pulled.length) lines.push(`↓ ${result.pulled.map(basename).join(', ')}`);
+      if (result.deleted.length) lines.push(`🗑 ${result.deleted.map(basename).join(', ')}`);
+      new Notice(lines.length ? lines.join('\n') : 'Sync: nada a fazer', 6000);
       if (result.errors.length > 0) console.error('Sync errors', result.errors);
 
       return result;
@@ -200,4 +204,8 @@ export default class SyncPlugin extends Plugin {
     if (!this.registryCache) this.registryCache = await fetchRegistry();
     return this.registryCache;
   }
+}
+
+function basename(path: string): string {
+  return path.split('/').pop() ?? path;
 }
