@@ -1,6 +1,6 @@
-import { Plugin, Notice } from 'obsidian';
+import { Plugin, Notice, TAbstractFile, TFile } from 'obsidian';
 import { SyncSettings, DEFAULT_SETTINGS, SyncSettingTab } from './settings';
-import { HttpContext, testConnection } from './http/client';
+import { HttpContext, testConnection, deleteFile } from './http/client';
 import { runSync, SyncResult } from './sync/engine';
 import { detectLocalPlugins } from './plugins/detector';
 import { fetchRegistry, RegistryEntry } from './plugins/registry';
@@ -28,6 +28,17 @@ export default class SyncPlugin extends Plugin {
     });
 
     this.addSettingTab(new SyncSettingTab(this.app, this));
+
+    this.registerEvent(
+      this.app.vault.on('delete', (file: TAbstractFile) => {
+        if (!(file instanceof TFile)) return;
+        if (file.path.startsWith('.obsidian/')) return;
+        if (!this.settings.serverUrl || !this.settings.password) return;
+        deleteFile(this.getHttpCtx(), file.path).catch((err) => {
+          console.warn(`Sync: failed to delete ${file.path} on server`, err);
+        });
+      }),
+    );
 
     if (this.settings.autoSyncInterval > 0) {
       const intervalMs = this.settings.autoSyncInterval * 60 * 1000;
