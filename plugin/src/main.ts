@@ -8,7 +8,7 @@ import { pushPluginData, pullPluginList, pullPluginConfig } from './plugins/sync
 import { installPluginFromGitHub, installPluginConfig, enablePlugin } from './plugins/installer';
 import { MissingPluginsModal } from './plugins/modal';
 
-const DEBOUNCE_MS = 60_000; // 1 minuto
+const DEBOUNCE_MS = 20_000; // 20 segundos
 
 export default class SyncPlugin extends Plugin {
   settings: SyncSettings;
@@ -38,7 +38,7 @@ export default class SyncPlugin extends Plugin {
       if (this.debounceTimer !== null) window.clearTimeout(this.debounceTimer);
       this.debounceTimer = window.setTimeout(() => {
         this.debounceTimer = null;
-        this.performSync();
+        this.performSync(true);
       }, DEBOUNCE_MS);
     };
 
@@ -125,19 +125,19 @@ export default class SyncPlugin extends Plugin {
     }
   }
 
-  async performSync(): Promise<SyncResult> {
+  async performSync(silent = false): Promise<SyncResult> {
     if (this.syncing) {
-      new Notice('Sync: já em andamento');
+      if (!silent) new Notice('Sync: já em andamento');
       return { pushed: [], pulled: [], deleted: [], errors: ['already in progress'] };
     }
     if (!this.settings.serverUrl || !this.settings.password) {
-      new Notice('Sync: configure a URL do servidor e a senha primeiro.');
+      if (!silent) new Notice('Sync: configure a URL do servidor e a senha primeiro.');
       return { pushed: [], pulled: [], deleted: [], errors: ['not configured'] };
     }
 
     this.syncing = true;
     try {
-      new Notice('Sync: iniciando...');
+      if (!silent) new Notice('Sync: iniciando...');
       const ctx = this.getHttpCtx();
 
       const deleted = [...this.pendingDeletes];
