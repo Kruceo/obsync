@@ -14,7 +14,9 @@ export async function runSync(ctx: HttpContext, vault: Vault, pendingDeletes: st
   const result: SyncResult = { pushed: [], pulled: [], deleted: [], errors: [] };
 
   // 1. Monta manifesto local: path → hash
-  const localFiles = vault.getFiles().filter((f) => !f.path.startsWith('.obsidian/'));
+  const localFiles = vault.getFiles().filter(
+    (f) => !f.path.startsWith('.obsidian/') && !f.path.startsWith('_obsync/'),
+  );
   const manifest: Record<string, string> = {};
 
   await Promise.all(
@@ -36,6 +38,10 @@ export async function runSync(ctx: HttpContext, vault: Vault, pendingDeletes: st
     result.errors.push(`manifest: ${err instanceof Error ? err.message : String(err)}`);
     return result;
   }
+  const isInternal = (p: string) => p.startsWith('_obsync/');
+  diff.push = diff.push.filter((p) => !isInternal(p));
+  diff.pull = diff.pull.filter((p) => !isInternal(p));
+  diff.delete = diff.delete.filter((p) => !isInternal(p));
   log(`diff — push: [${diff.push.join(', ')}] pull: [${diff.pull.join(', ')}] delete: [${diff.delete.join(', ')}]`);
 
   const sem = new Semaphore(5);
