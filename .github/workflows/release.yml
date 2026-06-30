@@ -91,18 +91,15 @@ jobs:
     needs: server
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           pattern: server-*
           merge-multiple: true
           path: release
-      - name: Create server tag and release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git tag server-${{ github.ref_name }}
-          git push origin server-${{ github.ref_name }}
-          gh release create server-${{ github.ref_name }} release/* \
-            --title "server-${{ github.ref_name }}" \
-            --notes "Server binaries for plugin version ${{ github.ref_name }}"
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: server-${{ github.ref_name }}
+          name: server-${{ github.ref_name }}
+          files: release/*
+          generate_release_notes: false
+          body: "Server binaries for Obsync ${{ github.ref_name }}"
