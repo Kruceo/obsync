@@ -24,8 +24,7 @@ jobs:
           cache-dependency-path: plugin/package-lock.json
       - run: npm ci
       - run: npm run build
-      - name: Upload plugin artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: plugin
           path: |
@@ -66,25 +65,40 @@ jobs:
           EXT=""
           [ "${{ matrix.os }}" = "windows" ] && EXT=".exe"
           go build -o obsidian-sync-server-${{ matrix.os }}-${{ matrix.arch }}${EXT} .
-      - name: Upload server artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: server-${{ matrix.os }}-${{ matrix.arch }}
           path: server/obsidian-sync-server-*
 
-  release:
-    name: Create release
-    needs: [plugin, server]
+  release-client:
+    name: Release client
+    needs: plugin
     runs-on: ubuntu-latest
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
+          name: plugin
           path: release
-          merge-multiple: true
-      - name: List release files
-        run: ls -la release/
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_name }}-client
+          name: ${{ github.ref_name }}-client
           files: release/*
-          generate_release_notes: true
+          generate_release_notes: false
+
+  release-server:
+    name: Release server
+    needs: server
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: server-*
+          merge-multiple: true
+          path: release
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}-server
+          name: ${{ github.ref_name }}-server
+          files: release/*
+          generate_release_notes: false
