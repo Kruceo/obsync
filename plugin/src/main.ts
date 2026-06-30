@@ -1,6 +1,7 @@
 import { Plugin, Notice, TAbstractFile, TFile } from 'obsidian';
 import { SyncSettings, DEFAULT_SETTINGS, SyncSettingTab } from './settings';
 import { HttpContext, testConnection } from './http/client';
+import { log, warn, error as logError } from './log';
 import { runSync, SyncResult } from './sync/engine';
 import { detectLocalPlugins } from './plugins/detector';
 import { fetchRegistry, RegistryEntry } from './plugins/registry';
@@ -44,19 +45,29 @@ export default class SyncPlugin extends Plugin {
 
     this.registerEvent(
       this.app.vault.on('create', (file: TAbstractFile) => {
-        if (file instanceof TFile && !file.path.startsWith('.obsidian/')) scheduleSync();
+        if (file instanceof TFile && !file.path.startsWith('.obsidian/')) {
+          log(`create: ${file.path}`);
+          scheduleSync();
+        }
       }),
     );
 
     this.registerEvent(
       this.app.vault.on('modify', (file: TAbstractFile) => {
-        if (file instanceof TFile && !file.path.startsWith('.obsidian/')) scheduleSync();
+        if (file instanceof TFile && !file.path.startsWith('.obsidian/')) {
+          log(`modify: ${file.path}`);
+          scheduleSync();
+        }
       }),
     );
 
     this.registerEvent(
-      this.app.vault.on('rename', (file: TAbstractFile) => {
-        if (file instanceof TFile && !file.path.startsWith('.obsidian/')) scheduleSync();
+      this.app.vault.on('rename', (file: TAbstractFile, oldPath: string) => {
+        if (!(file instanceof TFile)) return;
+        if (file.path.startsWith('.obsidian/')) return;
+        log(`rename: ${oldPath} → ${file.path}`);
+        this.pendingDeletes.add(oldPath);
+        scheduleSync();
       }),
     );
 
@@ -64,6 +75,7 @@ export default class SyncPlugin extends Plugin {
       this.app.vault.on('delete', (file: TAbstractFile) => {
         if (!(file instanceof TFile)) return;
         if (file.path.startsWith('.obsidian/')) return;
+        log(`delete: ${file.path}`);
         this.pendingDeletes.add(file.path);
         scheduleSync();
       }),
@@ -141,9 +153,11 @@ export default class SyncPlugin extends Plugin {
       const ctx = this.getHttpCtx();
 
       const deleted = [...this.pendingDeletes];
+      log(`sync start — pendingDeletes: [${deleted.join(', ')}]`);
       const result = await runSync(ctx, this.app.vault, deleted);
       // limpa só após sync bem-sucedido
       deleted.forEach((p) => this.pendingDeletes.delete(p));
+      log(`sync done — pushed: [${result.pushed.join(', ')}] pulled: [${result.pulled.join(', ')}] deleted: [${result.deleted.join(', ')}]`);
 
       if (this.settings.syncPluginList) {
         try {
@@ -192,7 +206,7 @@ export default class SyncPlugin extends Plugin {
       if (result.pulled.length) lines.push(`↓ ${result.pulled.map(basename).join(', ')}`);
       if (result.deleted.length) lines.push(`🗑 ${result.deleted.map(basename).join(', ')}`);
       new Notice(lines.length ? lines.join('\n') : 'Sync: nada a fazer', 6000);
-      if (result.errors.length > 0) console.error('Sync errors', result.errors);
+      if (result.errors.length > 0) logError('sync errors', result.errors);
 
       return result;
     } finally {
