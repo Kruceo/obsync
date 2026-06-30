@@ -1,6 +1,7 @@
 import { Vault, TFile, normalizePath } from 'obsidian';
 import { HttpContext, syncManifest, putFile, getFile, deleteFile } from '../http/client';
 import { hashContent } from './hash';
+import { log, warn } from '../log';
 
 export interface SyncResult {
   pushed: string[];
@@ -35,6 +36,7 @@ export async function runSync(ctx: HttpContext, vault: Vault, pendingDeletes: st
     result.errors.push(`manifest: ${err instanceof Error ? err.message : String(err)}`);
     return result;
   }
+  log(`diff — push: [${diff.push.join(', ')}] pull: [${diff.pull.join(', ')}] delete: [${diff.delete.join(', ')}]`);
 
   const sem = new Semaphore(5);
 
