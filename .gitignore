@@ -1,4 +1,6 @@
 node_modules/
+plugin/main.js
+server/obsidian-sync-server
 *.env
 !.env.example
 session-*.md
