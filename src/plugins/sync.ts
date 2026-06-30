@@ -1,83 +1,53 @@
-import { S3Context, getObject, putObject } from '../s3/client';
-import { S3SyncSettings } from '../settings';
+import { HttpContext, putFile, getFile } from '../http/client';
+import { SyncSettings } from '../settings';
 import { LocalPluginInfo } from './detector';
 import { Vault, normalizePath } from 'obsidian';
 
-const PLUGINS_LIST_KEY = '_s3sync/plugins.json';
-const CONFIG_PREFIX = '_s3sync/plugin-configs/';
+const PLUGINS_LIST_PATH = '_obsync/plugins.json';
+const CONFIG_PREFIX = '_obsync/configs/';
+const DUMMY_HASH = 'dynamic';
 
-const SAFE_ID_REGEX = /^[a-zA-Z0-9_-]+$/;
-
-function validatePluginId(id: string): boolean {
-	return SAFE_ID_REGEX.test(id);
-}
-
-/** Sobe plugins.json + configs para S3. */
+/** Sobe plugins.json + configs para o servidor. */
 export async function pushPluginData(
-  s3Ctx: S3Context,
+  ctx: HttpContext,
   plugins: LocalPluginInfo[],
   vault: Vault,
-  settings: S3SyncSettings,
+  settings: SyncSettings,
 ): Promise<void> {
   const payload = new TextEncoder().encode(JSON.stringify(plugins));
-  await putObject(s3Ctx, PLUGINS_LIST_KEY, payload, 'application/json');
+  await putFile(ctx, PLUGINS_LIST_PATH, DUMMY_HASH, payload.buffer as ArrayBuffer);
 
   if (settings.syncPluginConfigs) {
     for (const plugin of plugins) {
       try {
         const configPath = normalizePath(`.obsidian/plugins/${plugin.id}/data.json`);
-        const exists = await vault.adapter.exists(configPath);
-        if (!exists) continue;
-
+        if (!(await vault.adapter.exists(configPath))) continue;
         const raw = await vault.adapter.read(configPath);
         const data = new TextEncoder().encode(raw);
-        await putObject(s3Ctx, `${CONFIG_PREFIX}${plugin.id}.json`, data, 'application/json');
+        await putFile(ctx, `${CONFIG_PREFIX}${plugin.id}.json`, DUMMY_HASH, data.buffer as ArrayBuffer);
       } catch (err) {
-        console.warn(`S3 Sync: failed to push config for ${plugin.id}`, err);
+        console.warn(`Sync: failed to push config for ${plugin.id}`, err);
       }
     }
   }
 }
 
-/** Baixa plugins.json remoto. Retorna null se não existir. */
-export async function pullPluginList(s3Ctx: S3Context): Promise<LocalPluginInfo[] | null> {
+/** Baixa plugins.json do servidor. Retorna null se não existir. */
+export async function pullPluginList(ctx: HttpContext): Promise<LocalPluginInfo[] | null> {
   try {
-    const data = await getObject(s3Ctx, PLUGINS_LIST_KEY);
+    const data = await getFile(ctx, PLUGINS_LIST_PATH);
     const json = JSON.parse(new TextDecoder().decode(data));
-    if (!Array.isArray(json)) return [];
-    return json as LocalPluginInfo[];
-  } catch (err) {
-    const errName = (err as any)?.name ?? '';
-    const errMessage = err instanceof Error ? err.message : String(err);
-    const isMissing =
-      errName === 'NoSuchKey' ||
-      errName === 'NotFound' ||
-      errMessage.includes('404') ||
-      errMessage.includes('Not Found') ||
-      errMessage.includes('empty body');
-    if (!isMissing) {
-      console.error('S3 Sync: failed to pull plugin list', err);
-    }
+    return Array.isArray(json) ? (json as LocalPluginInfo[]) : [];
+  } catch {
     return null;
   }
 }
 
-/** Baixa config de um plugin do S3. Retorna null se não existir. */
-export async function pullPluginConfig(s3Ctx: S3Context, pluginId: string): Promise<Uint8Array | null> {
+/** Baixa config de um plugin. Retorna null se não existir. */
+export async function pullPluginConfig(ctx: HttpContext, pluginId: string): Promise<ArrayBuffer | null> {
   try {
-    return await getObject(s3Ctx, `${CONFIG_PREFIX}${pluginId}.json`);
-  } catch (err) {
-    const errName = (err as any)?.name ?? '';
-    const errMessage = err instanceof Error ? err.message : String(err);
-    const isMissing =
-      errName === 'NoSuchKey' ||
-      errName === 'NotFound' ||
-      errMessage.includes('404') ||
-      errMessage.includes('Not Found') ||
-      errMessage.includes('empty body');
-    if (!isMissing) {
-      console.error(`S3 Sync: failed to pull plugin config ${pluginId}`, err);
-    }
+    return await getFile(ctx, `${CONFIG_PREFIX}${pluginId}.json`);
+  } catch {
     return null;
   }
 }

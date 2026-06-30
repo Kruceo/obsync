@@ -100,10 +100,10 @@ export async function installPluginFromGitHub(vault: Vault, entry: RegistryEntry
 }
 
 /** Grava data.json (config) para um plugin. */
-export async function installPluginConfig(vault: Vault, pluginId: string, configData: Uint8Array): Promise<void> {
+export async function installPluginConfig(vault: Vault, pluginId: string, configData: ArrayBuffer): Promise<void> {
   const configPath = normalizePath(`.obsidian/plugins/${pluginId}/data.json`);
   try {
-    await vault.adapter.write(configPath, configData);
+    await vault.adapter.write(configPath, new Uint8Array(configData));
   } catch (err) {
     console.error(`S3 Sync: failed to write plugin config ${pluginId}`, err);
     throw err;

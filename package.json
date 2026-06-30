@@ -13,13 +13,10 @@
     "minio:logs": "docker-compose logs -f minio",
     "minio:setup": "bash scripts/setup-minio.sh"
   },
-  "dependencies": {
-    "@aws-sdk/client-s3": "^3.500.0"
-  },
   "devDependencies": {
-    "obsidian": "latest",
+    "@types/node": "latest",
     "esbuild": "latest",
-    "typescript": "latest",
-    "@types/node": "latest"
+    "obsidian": "latest",
+    "typescript": "latest"
   }
 }

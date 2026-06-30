@@ -1,43 +1,37 @@
-import { Plugin, Notice, TFile, normalizePath } from 'obsidian';
-import { S3SyncSettings, DEFAULT_SETTINGS, S3SyncSettingTab } from './settings';
-import { S3Context, testConnection as testS3Connection } from './s3/client';
-import { SyncState, loadState, buildS3Key, clearStateIfS3Changed } from './sync/state';
+import { Plugin, Notice } from 'obsidian';
+import { SyncSettings, DEFAULT_SETTINGS, SyncSettingTab } from './settings';
+import { HttpContext, testConnection } from './http/client';
 import { runSync, SyncResult } from './sync/engine';
-import { detectLocalPlugins, LocalPluginInfo } from './plugins/detector';
+import { detectLocalPlugins } from './plugins/detector';
 import { fetchRegistry, RegistryEntry } from './plugins/registry';
 import { pushPluginData, pullPluginList, pullPluginConfig } from './plugins/sync';
 import { installPluginFromGitHub, installPluginConfig, enablePlugin } from './plugins/installer';
 import { MissingPluginsModal } from './plugins/modal';
 
-export default class S3SyncPlugin extends Plugin {
-  settings: S3SyncSettings;
+export default class SyncPlugin extends Plugin {
+  settings: SyncSettings;
   autoSyncIntervalId: number | null = null;
   private registryCache: Map<string, RegistryEntry> | null = null;
   private syncing = false;
+  private httpCtx: HttpContext | null = null;
   private dataWriteLock: Promise<void> = Promise.resolve();
 
   async onload(): Promise<void> {
     await this.loadSettings();
 
-    this.addRibbonIcon('refresh-cw', 'S3 Sync', () => {
-      this.performSync();
-    });
+    this.addRibbonIcon('refresh-cw', 'Obsidian Sync', () => this.performSync());
 
     this.addCommand({
       id: 'sync-now',
       name: 'Sync now',
-      callback: () => {
-        this.performSync();
-      },
+      callback: () => this.performSync(),
     });
 
-    this.addSettingTab(new S3SyncSettingTab(this.app, this));
+    this.addSettingTab(new SyncSettingTab(this.app, this));
 
-    if (this.settings.autoSyncInterval && this.settings.autoSyncInterval > 0) {
+    if (this.settings.autoSyncInterval > 0) {
       const intervalMs = this.settings.autoSyncInterval * 60 * 1000;
-      this.autoSyncIntervalId = window.setInterval(() => {
-        this.performSync();
-      }, intervalMs);
+      this.autoSyncIntervalId = window.setInterval(() => this.performSync(), intervalMs);
       this.registerInterval(this.autoSyncIntervalId);
     }
   }
@@ -51,8 +45,8 @@ export default class S3SyncPlugin extends Plugin {
 
   async loadSettings(): Promise<void> {
     const data = await this.loadData();
-    const { syncState, ...settings } = data || {};
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, settings);
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, data || {});
+    this.httpCtx = null; // reseta contexto ao carregar settings
   }
 
   async saveSettings(): Promise<void> {
@@ -61,148 +55,102 @@ export default class S3SyncPlugin extends Plugin {
     this.dataWriteLock = new Promise<void>((resolve) => { release = resolve; });
     await prev;
     try {
-      const data = (await this.loadData()) || {};
-      Object.assign(data, this.settings);
-      await this.saveData(data);
+      await this.saveData(this.settings);
+      this.httpCtx = null; // força re-login se credenciais mudaram
     } finally {
       release();
     }
   }
 
-  private buildS3Context(): S3Context {
-    return {
-      endpoint: this.settings.endpoint,
-      region: this.settings.region,
-      accessKeyId: this.settings.accessKeyId,
-      secretAccessKey: this.settings.secretAccessKey,
-      bucket: this.settings.bucket,
-      forcePathStyle: this.settings.forcePathStyle,
-      prefix: this.settings.prefix,
-    };
+  private getHttpCtx(): HttpContext {
+    if (!this.httpCtx) {
+      this.httpCtx = {
+        serverUrl: this.settings.serverUrl.replace(/\/$/, ''),
+        password: this.settings.password,
+      };
+    }
+    return this.httpCtx;
   }
 
   async testConnection(): Promise<void> {
-    const s3Ctx = this.buildS3Context();
-    try {
-      const result = await testS3Connection(s3Ctx);
-      if (result.ok) {
-        new Notice('S3 Sync: Conexão OK!');
-      } else {
-        new Notice('S3 Sync: Falha na conexão — ' + result.error);
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      new Notice('S3 Sync: Falha na conexão — ' + message);
+    const result = await testConnection(this.getHttpCtx());
+    if (result.ok) {
+      new Notice('Sync: Conexão OK!');
+    } else {
+      new Notice('Sync: Falha — ' + result.error);
     }
   }
 
   async performSync(): Promise<SyncResult> {
     if (this.syncing) {
-      new Notice('S3 Sync: sincronização já em andamento');
-      return { pushed: 0, pulled: 0, deleted: 0, conflicts: 0, errors: ['Sync already in progress'] };
+      new Notice('Sync: já em andamento');
+      return { pushed: 0, pulled: 0, deleted: 0, errors: ['already in progress'] };
     }
+    if (!this.settings.serverUrl || !this.settings.password) {
+      new Notice('Sync: configure a URL do servidor e a senha primeiro.');
+      return { pushed: 0, pulled: 0, deleted: 0, errors: ['not configured'] };
+    }
+
     this.syncing = true;
     try {
-      new Notice('S3 Sync: Iniciando sincronização...');
+      new Notice('Sync: iniciando...');
+      const ctx = this.getHttpCtx();
 
-      const s3Ctx = this.buildS3Context();
-      let result: SyncResult = {
-        pushed: 0,
-        pulled: 0,
-        deleted: 0,
-        conflicts: 0,
-        errors: [],
-      };
-
-      try {
-        const s3Key = buildS3Key(this.settings.endpoint, this.settings.bucket, this.settings.prefix ?? '');
-        await clearStateIfS3Changed(this, s3Key);
-        const state: SyncState = await loadState(this);
-        result = await runSync({
-          s3Ctx,
-          vault: this.app.vault,
-          plugin: this,
-          settings: this.settings,
-          state,
-        });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        result.errors.push(`Sync engine: ${message}`);
-        console.error('S3 Sync: sync engine error', err);
-      }
+      const result = await runSync(ctx, this.app.vault);
 
       if (this.settings.syncPluginList) {
-      try {
-        const localPlugins = await detectLocalPlugins(this.app.vault);
-        await pushPluginData(s3Ctx, localPlugins, this.app.vault, this.settings);
+        try {
+          const localPlugins = await detectLocalPlugins(this.app.vault);
+          await pushPluginData(ctx, localPlugins, this.app.vault, this.settings);
 
-        const remotePlugins = await pullPluginList(s3Ctx);
-        if (remotePlugins) {
-          const localIds = new Set(localPlugins.map((p) => p.id));
-          const missing = remotePlugins.filter((p) => !localIds.has(p.id));
+          const remotePlugins = await pullPluginList(ctx);
+          if (remotePlugins) {
+            const localIds = new Set(localPlugins.map((p) => p.id));
+            const missing = remotePlugins.filter((p) => !localIds.has(p.id));
 
-          if (missing.length > 0) {
-            const registry = await this.getRegistry();
-
-            new MissingPluginsModal(this.app, missing, async (selectedIds, syncConfigs) => {
-              for (const id of selectedIds) {
-                const remoteInfo = remotePlugins.find((p) => p.id === id);
-                if (!remoteInfo) continue;
-
-                const entry = registry.get(id);
-                if (!entry) {
-                  console.warn(`S3 Sync: plugin ${id} not found in community registry`);
-                  new Notice(`S3 Sync: plugin ${id} não encontrado no registry`);
-                  continue;
-                }
-
-                try {
-                  await installPluginFromGitHub(this.app.vault, entry);
-
-                  if (syncConfigs && this.settings.syncPluginConfigs) {
-                    const configData = await pullPluginConfig(s3Ctx, id);
-                    if (configData) {
-                      await installPluginConfig(this.app.vault, id, configData);
-                    }
+            if (missing.length > 0) {
+              const registry = await this.getRegistry();
+              new MissingPluginsModal(this.app, missing, async (selectedIds, syncConfigs) => {
+                for (const id of selectedIds) {
+                  const remoteInfo = remotePlugins.find((p) => p.id === id);
+                  if (!remoteInfo) continue;
+                  const entry = registry.get(id);
+                  if (!entry) {
+                    new Notice(`Sync: plugin ${id} não encontrado no registry`);
+                    continue;
                   }
-
-                  await enablePlugin(this.app, id);
-                  new Notice(`S3 Sync: plugin ${entry.name} instalado`);
-                } catch (err) {
-                  const message = err instanceof Error ? err.message : String(err);
-                  result.errors.push(`Install plugin ${id}: ${message}`);
-                  new Notice(`S3 Sync: erro ao instalar ${id}`);
-                  console.error(`S3 Sync: failed to install plugin ${id}`, err);
+                  try {
+                    await installPluginFromGitHub(this.app.vault, entry);
+                    if (syncConfigs && this.settings.syncPluginConfigs) {
+                      const configData = await pullPluginConfig(ctx, id);
+                      if (configData) await installPluginConfig(this.app.vault, id, configData);
+                    }
+                    await enablePlugin(this.app, id);
+                    new Notice(`Sync: plugin ${entry.name} instalado`);
+                  } catch (err) {
+                    new Notice(`Sync: erro ao instalar ${id}`);
+                    console.error(`Sync: failed to install plugin ${id}`, err);
+                  }
                 }
-              }
-            }).open();
+              }).open();
+            }
           }
+        } catch (err) {
+          result.errors.push(`plugin sync: ${err instanceof Error ? err.message : String(err)}`);
         }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        result.errors.push(`Plugin sync: ${message}`);
-        console.error('S3 Sync: plugin sync error', err);
       }
-    }
 
-    new Notice(
-      `Sync completo: ${result.pushed}↑ ${result.pulled}↓ ${result.conflicts}⚡ ${result.deleted}🗑`,
-    );
+      new Notice(`Sync completo: ${result.pushed}↑ ${result.pulled}↓ ${result.deleted}🗑`);
+      if (result.errors.length > 0) console.error('Sync errors', result.errors);
 
-    if (result.errors.length > 0) {
-      console.error('S3 Sync: errors during sync', result.errors);
-    }
-
-    return result;
+      return result;
     } finally {
       this.syncing = false;
     }
   }
 
   private async getRegistry(): Promise<Map<string, RegistryEntry>> {
-    if (!this.registryCache) {
-      this.registryCache = await fetchRegistry();
-    }
+    if (!this.registryCache) this.registryCache = await fetchRegistry();
     return this.registryCache;
   }
 }
