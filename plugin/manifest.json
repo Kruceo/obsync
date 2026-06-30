@@ -3,7 +3,7 @@
   "name": "S3 Sync + Plugins",
   "version": "1.0.0",
   "minAppVersion": "0.15.0",
-  "description": "Sync vault via S3/MinIO e sincroniza plugins community entre dispositivos.",
+  "description": "Sync vault via servidor HTTP próprio e sincroniza plugins community entre dispositivos.",
   "author": "Rafael",
-  "isDesktopOnly": true
+  "isDesktopOnly": false
 }
