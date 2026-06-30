@@ -28,8 +28,10 @@ func Diff(client ClientManifest, server storage.Manifest) DiffResult {
 		}
 
 		clientHash, exists := client[path]
-		if !exists || clientHash != entry.Hash {
+		if !exists {
 			result.Pull = append(result.Pull, path)
+		} else if clientHash != entry.Hash {
+			result.Push = append(result.Push, path)
 		}
 	}
 
