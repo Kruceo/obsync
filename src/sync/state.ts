@@ -21,6 +21,29 @@ const EMPTY_STATE: SyncState = {
   files: {},
 };
 
+/** Chave que identifica o S3 usado no último sync (endpoint+bucket). */
+const S3_KEY = 's3Key';
+
+export function buildS3Key(endpoint: string, bucket: string, prefix: string): string {
+  return `${endpoint}|${bucket}|${prefix}`;
+}
+
+/**
+ * Se o endpoint/bucket mudou desde o último sync, descarta o estado salvo
+ * para forçar um re-sync completo contra o novo S3.
+ */
+export async function clearStateIfS3Changed(
+  plugin: Plugin,
+  currentKey: string,
+): Promise<void> {
+  const data = (await plugin.loadData()) || {};
+  if (data[S3_KEY] && data[S3_KEY] !== currentKey) {
+    delete data[STATE_KEY];
+  }
+  data[S3_KEY] = currentKey;
+  await plugin.saveData(data);
+}
+
 /** Carrega estado do último sync via plugin.loadData(). Chave: `syncState`. */
 export async function loadState(plugin: Plugin): Promise<SyncState> {
   try {

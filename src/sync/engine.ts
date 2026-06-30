@@ -213,8 +213,8 @@ export async function runSync(ctx: SyncContext): Promise<SyncResult> {
       continue;
     }
 
-    // Caso 4: só local mudou → PUSH
-    if (local && localChanged && (!remoteChanged || !isFileState(remote))) {
+    // Caso 4: local mudou OU remoto simplesmente não existe (ex: troca de S3) → PUSH
+    if (local && (localChanged || !remote) && !isDeleted(remote)) {
       tasks.push(
         runWithSemaphore(async () => {
           try {
