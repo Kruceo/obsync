@@ -1,20 +1,15 @@
 import { Vault, normalizePath, requestUrl, App } from 'obsidian';
 import { RegistryEntry } from './registry';
 
+const SAFE_ID = /^[a-zA-Z0-9_-]+$/;
+
+function assertSafePluginId(id: string): void {
+  if (!SAFE_ID.test(id)) throw new Error(`Unsafe plugin id rejected: "${id}"`);
+}
+
 interface GitHubRelease {
   tag_name: string;
   assets?: Array<{ name: string; browser_download_url: string }>;
-}
-
-interface PluginManifest {
-  id: string;
-  name: string;
-  version: string;
-  minAppVersion?: string;
-  description?: string;
-  author?: string;
-  authorUrl?: string;
-  isDesktopOnly?: boolean;
 }
 
 function buildRawUrl(repo: string, branch: string, file: string): string {
@@ -25,103 +20,78 @@ function buildApiLatestUrl(repo: string): string {
   return `https://api.github.com/repos/${repo}/releases/latest`;
 }
 
-/**
- * Baixa manifest.json, main.js, styles.css do latest release e instala em .obsidian/plugins/<id>/.
- */
+const TEXT_FILES = new Set(['manifest.json', 'styles.css']);
+
 export async function installPluginFromGitHub(vault: Vault, entry: RegistryEntry): Promise<void> {
-  const pluginDir = normalizePath(`.obsidian/plugins/${entry.id}`);
+  assertSafePluginId(entry.id);
 
-  try {
-    await vault.adapter.mkdir(normalizePath(`.obsidian/plugins`));
-  } catch {
-    // diretório provavelmente já existe
-  }
+  const pluginsDir = normalizePath('.obsidian/plugins');
+  const pluginDir = normalizePath(`${pluginsDir}/${entry.id}`);
 
-  try {
-    await vault.adapter.mkdir(pluginDir);
-  } catch {
-    // diretório provavelmente já existe
+  for (const dir of [pluginsDir, pluginDir]) {
+    try { await vault.adapter.mkdir(dir); } catch { /* já existe */ }
   }
 
   let release: GitHubRelease | null = null;
   try {
-    const response = await requestUrl({
+    const res = await requestUrl({
       url: buildApiLatestUrl(entry.repo),
-      headers: {
-        'User-Agent': 'obsidian-s3-sync/1.0.0',
-      },
+      headers: { 'User-Agent': 'obsidian-s3-sync/1.0.0' },
     });
-    release = response.json as GitHubRelease;
+    release = res.json as GitHubRelease;
   } catch (err) {
-    console.warn(`S3 Sync: no GitHub release for ${entry.repo}, falling back to raw files`, err);
+    console.warn(`Sync: no GitHub release for ${entry.repo}, falling back to raw`, err);
   }
 
   const filesToInstall: { name: string; url: string }[] = [];
 
-  if (release && release.assets && release.assets.length > 0) {
-    const assetNames = ['manifest.json', 'main.js', 'styles.css'];
-    for (const name of assetNames) {
+  if (release?.assets?.length) {
+    for (const name of ['manifest.json', 'main.js', 'styles.css']) {
       const asset = release.assets.find((a) => a.name === name);
-      if (asset) {
-        filesToInstall.push({ name, url: asset.browser_download_url });
-      }
+      if (asset) filesToInstall.push({ name, url: asset.browser_download_url });
     }
   }
 
-  // Fallback: raw GitHub (master)
   if (filesToInstall.length === 0) {
     const branch = release?.tag_name || 'master';
-    const names = ['manifest.json', 'main.js', 'styles.css'];
-    for (const name of names) {
+    for (const name of ['manifest.json', 'main.js', 'styles.css']) {
       filesToInstall.push({ name, url: buildRawUrl(entry.repo, branch, name) });
     }
   }
 
   for (const { name, url } of filesToInstall) {
     try {
-      const response = await requestUrl({
-        url,
-        headers: {
-          'User-Agent': 'obsidian-s3-sync/1.0.0',
-        },
-      });
-      const content = response.arrayBuffer
-        ? new Uint8Array(response.arrayBuffer)
-        : new TextEncoder().encode(response.text);
-      await vault.adapter.write(normalizePath(`${pluginDir}/${name}`), content);
-    } catch (err) {
-      console.warn(`S3 Sync: failed to download ${name} from ${url}`, err);
-      // styles.css é opcional; não falhar tudo por causa disso.
-      if (name === 'manifest.json' || name === 'main.js') {
-        throw new Error(`Failed to download required plugin file ${name}: ${err}`);
+      const res = await requestUrl({ url, headers: { 'User-Agent': 'obsidian-s3-sync/1.0.0' } });
+      const dest = normalizePath(`${pluginDir}/${name}`);
+      if (TEXT_FILES.has(name)) {
+        await vault.adapter.write(dest, res.text);
+      } else {
+        await vault.adapter.writeBinary(dest, res.arrayBuffer);
       }
+    } catch (err) {
+      console.warn(`Sync: failed to download ${name} from ${url}`, err);
+      if (name !== 'styles.css') throw new Error(`Failed to download ${name}: ${err}`);
     }
   }
 }
 
-/** Grava data.json (config) para um plugin. */
 export async function installPluginConfig(vault: Vault, pluginId: string, configData: ArrayBuffer): Promise<void> {
+  assertSafePluginId(pluginId);
   const configPath = normalizePath(`.obsidian/plugins/${pluginId}/data.json`);
   try {
-    await vault.adapter.write(configPath, new Uint8Array(configData));
+    await vault.adapter.write(configPath, new TextDecoder().decode(configData));
   } catch (err) {
-    console.error(`S3 Sync: failed to write plugin config ${pluginId}`, err);
+    console.error(`Sync: failed to write plugin config ${pluginId}`, err);
     throw err;
   }
 }
 
-/** Habilita plugin via API privada do Obsidian. */
 export async function enablePlugin(app: App, pluginId: string): Promise<void> {
+  assertSafePluginId(pluginId);
   try {
     const plugins = (app as any).plugins;
-    if (!plugins) {
-      throw new Error('Obsidian plugin API not available');
-    }
-
-    if (typeof plugins.loadManifests === 'function') {
-      await plugins.loadManifests();
-    }
-
+    if (!plugins) throw new Error('Obsidian plugin API not available');
+    if (typeof plugins.loadManifests === 'function') await plugins.loadManifests();
     if (typeof plugins.enablePluginAndSave === 'function') {
       await plugins.enablePluginAndSave(pluginId);
     } else if (typeof plugins.enablePlugin === 'function') {
@@ -130,7 +100,7 @@ export async function enablePlugin(app: App, pluginId: string): Promise<void> {
       throw new Error('No enable plugin method available');
     }
   } catch (err) {
-    console.error(`S3 Sync: failed to enable plugin ${pluginId}`, err);
+    console.error(`Sync: failed to enable plugin ${pluginId}`, err);
     throw err;
   }
 }
